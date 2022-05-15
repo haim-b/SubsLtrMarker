@@ -27,7 +27,7 @@ namespace SubsLtrMarker
             }
 
             Console.WriteLine("Finished");
-            
+
             Console.WriteLine("Monitoring folder for new files.");
 
             Console.ReadLine();
@@ -41,32 +41,73 @@ namespace SubsLtrMarker
 
                 var lines = File.ReadAllLines(sub, encoding).ToList();
 
-                if (lines.Any(l => l.StartsWith(LeftToRightEmbeddingMark))
-                    || !lines.SelectMany(l => l).Any(c => IsHebrew(c))
-                    || File.Exists(Path.ChangeExtension(sub, "bak")))
+                if (IsAlreadyFixedSubtitle(lines)
+                    || !HasHebrewCharacters(lines)
+                    || AlreadyHasBackup(sub))
                 {
                     return;
                 }
 
-                bool isReadOnly = File.GetAttributes(sub).HasFlag(FileAttributes.ReadOnly);
-
-                if (isReadOnly)
+                using (HandleReadonlyFile(sub))
                 {
-                    File.SetAttributes(sub, File.GetAttributes(sub) & ~FileAttributes.ReadOnly);
-                }
-
-                File.WriteAllLines(Path.ChangeExtension(sub, "bak"), lines.ToArray());
-                File.WriteAllLines(sub, lines.Select(FixLine).ToArray(), encoding?.EncodingName == Encoding.Unicode.EncodingName ? Encoding.Unicode : Encoding.UTF8);
-
-                if (isReadOnly)
-                {
-                    File.SetAttributes(sub, File.GetAttributes(sub) | FileAttributes.ReadOnly);
+                    CreateSubtitleBackup(sub, lines);
+                    FixSubtitleFile(sub, encoding, lines);
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex);
             }
+        }
+
+        private static string FixLine(string line)
+        {
+            if (line == string.Empty || line.Contains("-->") || IsInt(line))
+            {
+                return line;
+            }
+
+            if (line.StartsWith(LeftToRightEmbeddingMark) || line.StartsWith(RightToLeftMark))
+            {
+                return line;
+            }
+
+            if (!TryGetFirstChar(line, out char firstChar)) // Contains only punctualtion
+            {
+                return line;
+            }
+
+            if (IsInt(firstChar.ToString()))
+            {
+                line = line.Replace(firstChar.ToString(), RightToLeftMark + firstChar.ToString());
+            }
+
+            return LeftToRightEmbeddingMark + line;
+        }
+
+        private static void FixSubtitleFile(string sub, Encoding encoding, System.Collections.Generic.List<string> lines)
+        {
+            File.WriteAllLines(sub, lines.Select(FixLine).ToArray(), encoding?.EncodingName == Encoding.Unicode.EncodingName ? Encoding.Unicode : Encoding.UTF8);
+        }
+
+        private static void CreateSubtitleBackup(string sub, System.Collections.Generic.List<string> lines)
+        {
+            File.WriteAllLines(Path.ChangeExtension(sub, "bak"), lines.ToArray());
+        }
+
+        private static bool AlreadyHasBackup(string sub)
+        {
+            return File.Exists(Path.ChangeExtension(sub, "bak"));
+        }
+
+        private static bool HasHebrewCharacters(System.Collections.Generic.List<string> lines)
+        {
+            return lines.SelectMany(l => l).Any(c => IsHebrew(c));
+        }
+
+        private static bool IsAlreadyFixedSubtitle(System.Collections.Generic.List<string> lines)
+        {
+            return lines.Any(l => l.StartsWith(LeftToRightEmbeddingMark));
         }
 
         // Taken from https://stackoverflow.com/questions/46558258/byte-array-read-from-a-file-and-byte-array-converted-from-string-read-from-same/46558425#46558425
@@ -83,29 +124,22 @@ namespace SubsLtrMarker
             return encoding;
         }
 
-        private static string FixLine(string line)
+        private static IDisposable HandleReadonlyFile(string sub)
         {
-            if (line == string.Empty || line.Contains("-->") || IsInt(line))
+            bool isReadOnly = File.GetAttributes(sub).HasFlag(FileAttributes.ReadOnly);
+
+            if (isReadOnly)
             {
-                return line;
+                File.SetAttributes(sub, File.GetAttributes(sub) & ~FileAttributes.ReadOnly);
             }
 
-            if (line.StartsWith(LeftToRightEmbeddingMark) || line.StartsWith(RightToLeftMark))
+            return new Disposable(() =>
             {
-                return line;
-            }
-
-            if (!TryGetFirstChar(line, out char firstChar)) // Contains only punctualtion
-            {                 
-                return line;
-            }
-
-            if (IsInt(firstChar.ToString()))
-            {
-                line = line.Replace(firstChar.ToString(), RightToLeftMark + firstChar.ToString());
-            }
-
-            return LeftToRightEmbeddingMark + line;
+                if (isReadOnly)
+                {
+                    File.SetAttributes(sub, File.GetAttributes(sub) | FileAttributes.ReadOnly);
+                }
+            });
         }
 
         private static IDisposable StartMonitoringFolder(string baseFolder)
