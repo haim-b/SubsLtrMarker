@@ -19,10 +19,7 @@ namespace SubsLtrMarker
         {
             string baseFolder = args.ElementAtOrDefault(0) ?? Environment.CurrentDirectory;
 
-            FileSystemWatcher fileSystemWatcher = new FileSystemWatcher(baseFolder, SubtitlesSearchPattern);
-            fileSystemWatcher.IncludeSubdirectories = true;
-            fileSystemWatcher.Created += OnFileCreatedOrChanged;
-            fileSystemWatcher.Renamed += OnFileCreatedOrChanged;
+            var watcher = StartMonitoringFolder(baseFolder);
 
             foreach (string sub in Directory.EnumerateFiles(baseFolder, SubtitlesSearchPattern, SearchOption.AllDirectories))
             {
@@ -30,6 +27,8 @@ namespace SubsLtrMarker
             }
 
             Console.WriteLine("Finished");
+            
+            Console.WriteLine("Monitoring folder for new files.");
 
             Console.ReadLine();
         }
@@ -84,14 +83,9 @@ namespace SubsLtrMarker
             return encoding;
         }
 
-        private static void OnFileCreatedOrChanged(object sender, FileSystemEventArgs e)
-        {
-            FixFile(e.FullPath);
-        }
-
         private static string FixLine(string line)
         {
-            if (line == string.Empty || line.Contains("-->") || int.TryParse(line, out _))
+            if (line == string.Empty || line.Contains("-->") || IsInt(line))
             {
                 return line;
             }
@@ -101,14 +95,12 @@ namespace SubsLtrMarker
                 return line;
             }
 
-            char firstChar = line.TrimStart(PanctuationMarks).ElementAtOrDefault(0);
-
-            if (firstChar == default(char))
-            {
+            if (!TryGetFirstChar(line, out char firstChar)) // Contains only punctualtion
+            {                 
                 return line;
             }
 
-            if (int.TryParse(firstChar.ToString(), out _))
+            if (IsInt(firstChar.ToString()))
             {
                 line = line.Replace(firstChar.ToString(), RightToLeftMark + firstChar.ToString());
             }
@@ -116,9 +108,37 @@ namespace SubsLtrMarker
             return LeftToRightEmbeddingMark + line;
         }
 
+        private static IDisposable StartMonitoringFolder(string baseFolder)
+        {
+            FileSystemWatcher fileSystemWatcher = new FileSystemWatcher(baseFolder, SubtitlesSearchPattern);
+            fileSystemWatcher.BeginInit();
+            fileSystemWatcher.IncludeSubdirectories = true;
+            fileSystemWatcher.Created += OnFileCreatedOrChanged;
+            fileSystemWatcher.Renamed += OnFileCreatedOrChanged;
+            fileSystemWatcher.EndInit();
+            return fileSystemWatcher;
+        }
+
+        private static void OnFileCreatedOrChanged(object sender, FileSystemEventArgs e)
+        {
+            FixFile(e.FullPath);
+        }
+
+        private static bool TryGetFirstChar(string line, out char firstChar)
+        {
+            firstChar = line.TrimStart(PanctuationMarks).ElementAtOrDefault(0);
+
+            return firstChar != default(char);
+        }
+
+        private static bool IsInt(string str)
+        {
+            return int.TryParse(str, out _);
+        }
 
         private const char FirstHebChar = (char)1488; //א
         private const char LastHebChar = (char)1514; //ת
+
         private static bool IsHebrew(char c)
         {
             return c >= FirstHebChar && c <= LastHebChar;
