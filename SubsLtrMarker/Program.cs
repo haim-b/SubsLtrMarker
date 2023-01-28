@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace SubsLtrMarker
 {
-    class Program
+    public class Program
     {
         private const char RightToLeftMark = (char)0x200F;
         private const char LeftToRightEmbeddingMark = (char)0x202A;
@@ -21,42 +21,61 @@ namespace SubsLtrMarker
 
             var watcher = StartMonitoringFolder(baseFolder);
 
-            foreach (string sub in Directory.EnumerateFiles(baseFolder, SubtitlesSearchPattern, SearchOption.AllDirectories))
-            {
-                FixFile(sub);
-            }
-
-            Console.WriteLine("Finished");
+            FixFolder(baseFolder);
 
             Console.WriteLine("Monitoring folder for new files.");
 
             Console.ReadLine();
         }
 
-        private static void FixFile(string sub)
+        public static int FixFolder(string baseFolder, bool createBackup = true)
         {
-            try
+            int successCounter = 0;
+
+            Console.WriteLine("Starting...");
+
+            foreach (string sub in Directory.EnumerateFiles(baseFolder, SubtitlesSearchPattern, SearchOption.AllDirectories))
             {
-                Encoding encoding = GetEncoding(sub);
-
-                var lines = File.ReadAllLines(sub, encoding).ToList();
-
-                if (IsAlreadyFixedSubtitle(lines)
-                    || !HasHebrewCharacters(lines)
-                    || AlreadyHasBackup(sub))
+                try
                 {
-                    return;
+                    if (FixFile(sub, createBackup))
+                    {
+                        successCounter++;
+                    }
                 }
-
-                using (HandleReadonlyFile(sub))
+                catch (Exception ex)
                 {
-                    CreateSubtitleBackup(sub, lines);
-                    FixSubtitleFile(sub, encoding, lines);
+                    Console.WriteLine(ex);
                 }
             }
-            catch (Exception ex)
+
+            Console.WriteLine("Finished");
+
+            return successCounter;
+        }
+
+        private static bool FixFile(string sub, bool createBackup = true)
+        {
+            Encoding encoding = GetEncoding(sub);
+
+            var lines = File.ReadAllLines(sub, encoding).ToList();
+
+            if (IsAlreadyFixedSubtitle(lines)
+                || !HasHebrewCharacters(lines)
+                || AlreadyHasBackup(sub))
             {
-                Console.WriteLine(ex);
+                return false;
+            }
+
+            using (HandleReadonlyFile(sub))
+            {
+                if (createBackup)
+                {
+                    CreateSubtitleBackup(sub, lines);
+                }
+
+                FixSubtitleFile(sub, encoding, lines);
+                return true;
             }
         }
 
@@ -155,7 +174,14 @@ namespace SubsLtrMarker
 
         private static void OnFileCreatedOrChanged(object sender, FileSystemEventArgs e)
         {
-            FixFile(e.FullPath);
+            try
+            {
+                FixFile(e.FullPath);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
         }
 
         private static bool TryGetFirstChar(string line, out char firstChar)
